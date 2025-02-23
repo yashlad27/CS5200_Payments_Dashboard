@@ -1,11 +1,14 @@
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
-import Cardholders from "./pages/Cardholders";
+import React from "react";
+import Dashboard from "./pages/Dashboard";
+
+console.log("App component is rendering!");
 
 function App() {
     return (
         <Router>
             <Routes>
-                <Route path="/cardholders" element={<Cardholders />} />
+                <Route path="/" element={<Dashboard />} />
             </Routes>
         </Router>
     );

@@ -4,6 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from dotenv import load_dotenv
 import pymysql
+import traceback
 
 # Load environment variables
 dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
@@ -11,94 +12,250 @@ load_dotenv(dotenv_path)
 
 # Initialize Flask App
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": "*"}})  # Allow frontend requests
 
-try:
-    conn = pymysql.connect(
-        host=os.getenv("DB_HOST"),
-        user=os.getenv("DB_USERNAME"),
-        password=os.getenv("DB_PASSWORD"),
-        database=os.getenv("DB_NAME")
-    )
-    print("Flask can connect to MySQL ✅")
-except pymysql.MySQLError as e:
-    print("Flask cannot connect to MySQL ❌", e)
-
-# Database Configuration using .env variables
-DB_USERNAME = os.getenv("DB_USERNAME")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_HOST = os.getenv("DB_HOST")
-DB_NAME = os.getenv("DB_NAME")
-
-print("DB_USERNAME:", DB_USERNAME)
-print("DB_PASSWORD:", DB_PASSWORD)
-print("DB_HOST:", DB_HOST)
-print("DB_NAME:", DB_NAME)
-
+# Database Configuration
+DB_USERNAME = os.getenv("DB_USERNAME", "root")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "test123")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_NAME = os.getenv("DB_NAME", "visa_payment_network")
 
 app.config['SQLALCHEMY_DATABASE_URI'] = f'mysql+pymysql://{DB_USERNAME}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}?ssl_disabled=True'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# Initialize SQLAlchemy
 db = SQLAlchemy(app)
 
-# Models
-class Cardholder(db.Model):
-    __tablename__ = 'cardholders'
-    cardholder_id = db.Column(db.Integer, primary_key=True)
-    first_name = db.Column(db.String(50), nullable=False)
-    last_name = db.Column(db.String(50), nullable=False)
-    email = db.Column(db.String(255), unique=True, nullable=False)
-    phone = db.Column(db.String(50))
-    cardholder_address = db.Column(db.Text)
+# Function to establish MySQL connection
+def get_db_connection():
+    try:
+        conn = pymysql.connect(
+            host=DB_HOST,
+            user=DB_USERNAME,
+            password=DB_PASSWORD,
+            database=DB_NAME,
+            cursorclass=pymysql.cursors.DictCursor,
+            autocommit=True
+        )
+        return conn
+    except pymysql.MySQLError as e:
+        print("Flask cannot connect to MySQL ❌", e)
+        return None
 
-class Transaction(db.Model):
-    __tablename__ = 'transactions'
-    transaction_id = db.Column(db.Integer, primary_key=True)
-    card_id = db.Column(db.Integer, db.ForeignKey('cardholders.cardholder_id'), nullable=False)
-    merchant_id = db.Column(db.Integer, nullable=False)
-    amount = db.Column(db.Float, nullable=False)
-    currency = db.Column(db.String(3), default='USD')
-    transaction_status = db.Column(db.String(20), nullable=False)
+# ------------------ ADVANCED SQL QUERIES ------------------
 
-# Routes
-@app.route('/api/cardholders', methods=['GET'])
-def get_cardholders():
-    cardholders = Cardholder.query.all()
-    return jsonify([{
-        'cardholder_id': c.cardholder_id,
-        'first_name': c.first_name,
-        'last_name': c.last_name,
-        'email': c.email,
-        'phone': c.phone,
-        'cardholder_address': c.cardholder_address
-    } for c in cardholders])
+### ✅ Total Number of Transactions ###
+@app.route('/api/total-transactions', methods=['GET'])
+def get_total_transactions():
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed'}), 500
 
-@app.route('/api/transactions', methods=['GET'])
-def get_transactions():
-    transactions = Transaction.query.all()
-    return jsonify([{
-        'transaction_id': t.transaction_id,
-        'card_id': t.card_id,
-        'merchant_id': t.merchant_id,
-        'amount': t.amount,
-        'currency': t.currency,
-        'transaction_status': t.transaction_status
-    } for t in transactions])
+    cursor = conn.cursor()
+    try:
+        query = "SELECT COUNT(*) as total_transactions FROM transactions"
+        cursor.execute(query)
+        result = cursor.fetchone()
+        return jsonify(result)
 
-@app.route('/api/cardholders', methods=['POST'])
-def add_cardholder():
-    data = request.json
-    new_cardholder = Cardholder(
-        first_name=data['first_name'],
-        last_name=data['last_name'],
-        email=data['email'],
-        phone=data['phone'],
-        cardholder_address=data['cardholder_address']
-    )
-    db.session.add(new_cardholder)
-    db.session.commit()
-    return jsonify({'message': 'Cardholder added successfully'}), 201
+    except Exception as e:
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
 
+    finally:
+        cursor.close()
+        conn.close()
+
+### ✅ Average Transaction Amount ###
+@app.route('/api/avg-transaction', methods=['GET'])
+def get_avg_transaction():
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed'}), 500
+
+    cursor = conn.cursor()
+    try:
+        query = "SELECT AVG(amount) as avg_transaction FROM transactions"
+        cursor.execute(query)
+        result = cursor.fetchone()
+        return jsonify(result)
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        cursor.close()
+        conn.close()
+
+### ✅ Minimum & Maximum Transaction Amount ###
+@app.route('/api/min-max-transaction', methods=['GET'])
+def get_min_max_transaction():
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed'}), 500
+
+    cursor = conn.cursor()
+    try:
+        query = """
+        SELECT 
+            MIN(amount) as min_transaction, 
+            MAX(amount) as max_transaction 
+        FROM transactions
+        """
+        cursor.execute(query)
+        result = cursor.fetchone()
+        return jsonify(result)
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        cursor.close()
+        conn.close()
+
+### ✅ Total Revenue Per Merchant ###
+@app.route('/api/revenue-per-merchant', methods=['GET'])
+def get_revenue_per_merchant():
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed'}), 500
+
+    cursor = conn.cursor()
+    try:
+        query = """
+        SELECT m.merchant_name, SUM(t.amount) as total_revenue
+        FROM transactions t
+        JOIN merchants m ON t.merchant_id = m.merchant_id
+        GROUP BY m.merchant_name
+        ORDER BY total_revenue DESC
+        """
+        cursor.execute(query)
+        merchants = cursor.fetchall()
+        return jsonify(merchants)
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        cursor.close()
+        conn.close()
+
+### ✅ Most Active Cardholders (Transaction Count) ###
+@app.route('/api/active-cardholders', methods=['GET'])
+def get_active_cardholders():
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed'}), 500
+
+    cursor = conn.cursor()
+    try:
+        query = """
+        SELECT c.first_name, c.last_name, COUNT(t.transaction_id) as transaction_count
+        FROM transactions t
+        JOIN cardholders c ON t.card_id = c.cardholder_id
+        GROUP BY c.cardholder_id
+        ORDER BY transaction_count DESC
+        LIMIT 10
+        """
+        cursor.execute(query)
+        cardholders = cursor.fetchall()
+        return jsonify(cardholders)
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        cursor.close()
+        conn.close()
+
+### ✅ Most Used Currencies in Transactions ###
+@app.route('/api/most-used-currencies', methods=['GET'])
+def get_most_used_currencies():
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed'}), 500
+
+    cursor = conn.cursor()
+    try:
+        query = """
+        SELECT currency, COUNT(*) as transaction_count
+        FROM transactions
+        GROUP BY currency
+        ORDER BY transaction_count DESC
+        """
+        cursor.execute(query)
+        currencies = cursor.fetchall()
+        return jsonify(currencies)
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        cursor.close()
+        conn.close()
+
+### ✅ Transactions Per Month ###
+@app.route('/api/transactions-per-month', methods=['GET'])
+def get_transactions_per_month():
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed'}), 500
+
+    cursor = conn.cursor()
+    try:
+        query = """
+        SELECT DATE_FORMAT(transaction_timestamp, '%Y-%m') AS month, COUNT(*) as total_transactions
+        FROM transactions
+        GROUP BY month
+        ORDER BY month ASC
+        """
+        cursor.execute(query)
+        transactions = cursor.fetchall()
+        return jsonify(transactions)
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        cursor.close()
+        conn.close()
+
+### ✅ Merchants with Failed Transactions ###
+@app.route('/api/failed-transactions-merchant', methods=['GET'])
+def get_failed_transactions_merchant():
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed'}), 500
+
+    cursor = conn.cursor()
+    try:
+        query = """
+        SELECT m.merchant_name, COUNT(*) as failed_transactions
+        FROM transactions t
+        JOIN merchants m ON t.merchant_id = m.merchant_id
+        WHERE t.transaction_status = 'declined'
+        GROUP BY m.merchant_name
+        ORDER BY failed_transactions DESC
+        """
+        cursor.execute(query)
+        merchants = cursor.fetchall()
+        return jsonify(merchants)
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        cursor.close()
+        conn.close()
+
+# ------------------ APP RUNNER ------------------
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()

@@ -24,3 +24,13 @@ export const fetchTransactions = async () => {
         return [];
     }
 }
+
+export const fetchTopMerchants = async () => {
+    try {
+        const response = await axios.get(`${API_BASE_URL}/top-merchants`);
+        return response.data;
+    } catch (error) {
+        console.error('Error fetching top merchants:', error);
+        return [];
+    }
+};
